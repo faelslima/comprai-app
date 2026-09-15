@@ -2,43 +2,28 @@
 
 Ver também `../CLAUDE.md` (raiz do monorepo) para arquitetura geral.
 
-## ⚠️ Este repositório está desatualizado em relação ao banco real
+## Este repositório é a fonte de verdade versionada do schema
 
-**As migrations aqui (`supabase/migrations/20250001_initial_schema.sql`, `20250002_rls_policies.sql`) nunca foram aplicadas ao projeto Supabase real.** Evidência: o projeto `jgxukiayybgkssdvmhfu` foi criado em **2026-05-28**, e a numeração destas migrations (`20250001...`) sugere 2025 — anterior à criação do projeto. É fisicamente impossível que tenham rodado contra este banco.
+Projeto Supabase único: `jgxukiayybgkssdvmhfu` (região us-west-2, Postgres 17), compartilhado entre frontend e backend.
 
-O schema **real e vigente** foi criado pelo Lovable Cloud diretamente dentro do repo do frontend, em `../comprai/supabase/migrations/` (4 arquivos, timestamps `20260529*`), e está refletido no `types.ts` gerado automaticamente em `../comprai/src/integrations/supabase/types.ts`. Principais diferenças:
+## Histórico de migrations (`supabase/migrations/`)
 
-| Aqui (histórico, não aplicado) | Real (`../comprai/supabase/migrations/`) |
-|---|---|
-| Tabela `items` | Tabela **`list_items`** |
-| Sem coluna `price` em items | `list_items.price`, `.unit`, `.checked_by`, `.updated_at` existem |
-| Sem função `is_list_creator()` | `is_list_creator(list_id, user_id)` existe |
-| Sem trigger de `updated_at` | Triggers `trg_lists_updated_at` e `trg_list_items_updated_at` |
-| `lists` SELECT só para membros | `lists` SELECT `USING (true)` — qualquer autenticado (para lookup por share_code) |
-| `item_price_observations` sem UPDATE/DELETE | UPDATE/DELETE liberados para o próprio usuário; `REPLICA IDENTITY FULL` |
+1. `20250001_initial_schema.sql` — schema inicial: `lists`, `list_members`, `items`, `item_price_observations`, `purchase_history`
+2. `20250002_rls_policies.sql` — RLS de todas as tabelas
+3. `20260915000000_migrate_items_to_list_items.sql` — reconciliação: o frontend (código gerado pelo Lovable Cloud contra um projeto Supabase antigo e já abandonado, `wrcqyxpvgokyjvcgbaim`) esperava uma tabela `list_items` com colunas `price`/`unit`/`updated_at` que não existiam aqui. Aplicada em 2026-09-15 diretamente no projeto real (todas as tabelas estavam com 0 linhas — sem risco de perda de dado). Renomeia `items` → `list_items`, adiciona as colunas faltantes + triggers de `updated_at` (`lists` e `list_items`), abre a policy de SELECT de `lists` para `USING (true)` (lookup por share_code), adiciona `list_id` denormalizado e policies de UPDATE/DELETE em `item_price_observations`, adiciona policy de DELETE em `purchase_history`, cria `is_list_creator()`, e publica `lists` no realtime.
 
-**Antes de escrever ou aplicar qualquer nova migration a partir deste repo, confirme com o usuário qual é a intenção:**
-1. **Ressincronizar** — copiar as 4 migrations reais de `../comprai/supabase/migrations/` para cá, e daqui em diante tratar este repo como a cópia versionada/auditável do schema (aplicando via `supabase db push` ou SQL Editor manualmente, mantendo o Lovable Cloud em sincronia).
-2. **Descontinuar como fonte de schema** — manter só como documentação de arquitetura (README, ARCHITECTURE.md) e deixar o Lovable Cloud (dentro do repo `comprai`) como único dono das migrations.
+**Execução:** copie o conteúdo de cada migration no SQL Editor do Supabase (em ordem) ou use `supabase db push` com CLI local.
 
-Nenhuma das duas opções foi executada — isto é só o diagnóstico.
-
----
-
-## O que é (quando a decisão acima for tomada)
-
-Repositório destinado a schema, RLS e migrations do Supabase do ComprAI — projeto único `jgxukiayybgkssdvmhfu` (região us-west-2, Postgres 17), compartilhado entre frontend e backend. Status atual do projeto: **INACTIVE** (pausado por inatividade — plano free pausa projetos sem uso; restaurar no dashboard antes de testar).
-
-## Schema real (ver `../CLAUDE.md` para o SQL completo)
+## Schema atual (ver `../CLAUDE.md` para o SQL completo com comentários)
 
 `lists`, `list_members`, `list_items`, `item_price_observations`, `purchase_history` — 5 tabelas, RLS em todas, realtime em `lists`/`list_members`/`list_items`/`item_price_observations`.
 
+## Pendência de segurança conhecida (baixa prioridade)
+
+`get_advisors` (Supabase) aponta `generate_share_code`, `auto_add_creator_as_member` e `is_list_member` sem `search_path` fixo, e `is_list_member(uuid)` ainda executável via RPC por `anon`/`authenticated` (diferente de `is_list_creator`, que já tem `EXECUTE` revogado). Vale uma migration futura para endurecer isso.
+
 ## Arquivos de doc já existentes neste repo
 
-- `README.md` — visão geral do monorepo (aponta para `../comprai` e `../ws-comprai`). Lista as 5 tabelas com o nome correto (`items`) mas isso reflete o schema **antigo/não aplicado** — atualizar junto com a decisão acima.
-- `ARCHITECTURE.md` — schema documentado bate com as migrations locais (não com o real). Referencia caminho antigo `C:\Users\faels\projects\comprai\...` — o ambiente atual usa `D:\projects\comprai\...`.
-- `FRONTEND_ENV.md` — variáveis de ambiente do frontend; inconsistente internamente (usa `VITE_SUPABASE_PUBLISHABLE_KEY` num trecho e `VITE_SUPABASE_ANON_KEY` em outro no mesmo arquivo) — corrigir para `VITE_SUPABASE_PUBLISHABLE_KEY` (é o nome real usado em `../comprai/src/integrations/supabase/client.ts`).
-
-## Executar migrations (enquanto a decisão de ressincronização não é tomada)
-
-Copie o conteúdo de cada migration no Supabase SQL Editor (em ordem) ou use `supabase db push` com CLI local — mas **valide antes contra o schema real** (`../comprai/src/integrations/supabase/types.ts`) para não recriar tabelas com nomes/colunas divergentes do que a aplicação já usa em produção.
+- `README.md` — visão geral do monorepo. Lista as 5 tabelas com o nome antigo (`items`) — atualizar para `list_items`.
+- `ARCHITECTURE.md` — referencia caminho antigo `C:\Users\faels\projects\comprai\...` — o ambiente atual usa `D:\projects\comprai\...`. Schema documentado também precisa do ajuste `items` → `list_items`.
+- `FRONTEND_ENV.md` — variáveis de ambiente do frontend; inconsistente internamente (usa `VITE_SUPABASE_PUBLISHABLE_KEY` num trecho e `VITE_SUPABASE_ANON_KEY` em outro) — corrigir para `VITE_SUPABASE_PUBLISHABLE_KEY` (nome real usado em `../comprai/src/integrations/supabase/client.ts`). Também vale registrar que o `SUPABASE_URL`/`VITE_SUPABASE_URL` corretos são os de `jgxukiayybgkssdvmhfu` — o `.env` **commitado** em `../comprai` ainda aponta para o projeto antigo `wrcqyxpvgokyjvcgbaim` (ver `../CLAUDE.md` #4).
